@@ -9,6 +9,7 @@ import { ExerciseEffect } from './components/ExerciseEffect';
 import { VoxelDog } from './components/VoxelDog';
 import { VoxelKangaroo } from './components/VoxelKangaroo';
 import { VoxelDachshunds } from './components/VoxelDachshund';
+import { VoxelHooni } from './components/VoxelHooni';
 import { HUD } from './components/HUD';
 import { MobileControls } from './components/MobileControls';
 import { useGameStore } from './store/gameStore';
@@ -84,6 +85,7 @@ function Game() {
       <VoxelDog />
       <VoxelKangaroo externalRef={kangarooRef} />
       <VoxelDachshunds kangarooRef={kangarooRef} />
+      <VoxelHooni />
       <ExerciseEffect />
     </>
   );

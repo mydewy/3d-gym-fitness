@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -19,8 +19,6 @@ function Box({ position, args, color }: {
 const BOUNDS = 10;
 const SPEED = 2.0;
 const JUMP_FORCE = 4;
-const _playerPos = new THREE.Vector3();
-const _kangarooTarget = new THREE.Vector3();
 
 export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<THREE.Group | null> }) {
   const groupRef = useRef<THREE.Group>(null!);
@@ -38,7 +36,7 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
   const earRightRef = useRef<THREE.Mesh>(null!);
 
   // AI state
-  const stateRef = useRef<'wander' | 'hop' | 'idle' | 'exercise'>('wander');
+  const stateRef = useRef<'wander' | 'idle' | 'exercise'>('wander');
   const targetRef = useRef(new THREE.Vector3(-3, 0, -3));
   const timerRef = useRef(0);
   const facingRef = useRef(0);
@@ -46,50 +44,33 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
   const hopTimerRef = useRef(0);
   const isAirborneRef = useRef(false);
 
-  const { scene } = useThree();
-
   useFrame(({ clock }, delta) => {
     if (!groupRef.current) return;
     const t = clock.elapsedTime;
     const pos = groupRef.current.position;
 
-    // Find player
-    const player = scene.getObjectByName('player');
-    if (player) {
-      player.getWorldPosition(_playerPos);
-    }
-
     timerRef.current -= delta;
     hopTimerRef.current -= delta;
 
-    const distToPlayer = player ? new THREE.Vector2(pos.x - _playerPos.x, pos.z - _playerPos.z).length() : 999;
-
-    // State machine
-    if (distToPlayer < 4 && distToPlayer > 2) {
-      stateRef.current = 'hop';
-      _kangarooTarget.set(_playerPos.x, 0, _playerPos.z);
-      const angle = Math.atan2(pos.x - _playerPos.x, pos.z - _playerPos.z);
-      _kangarooTarget.x += Math.sin(angle) * 2;
-      _kangarooTarget.z += Math.cos(angle) * 2;
-      targetRef.current.copy(_kangarooTarget);
-    } else if (distToPlayer <= 2) {
-      // Idle near player — occasionally do a little exercise
-      if (stateRef.current !== 'idle' && stateRef.current !== 'exercise') {
+    // State machine — wander freely, occasionally idle + shadow box
+    if (stateRef.current === 'wander' && timerRef.current <= 0) {
+      // Randomly stop and idle
+      if (Math.random() < 0.3) {
         stateRef.current = 'idle';
         timerRef.current = 2 + Math.random() * 3;
+      } else {
+        targetRef.current.set(
+          (Math.random() - 0.5) * BOUNDS * 1.6,
+          0,
+          (Math.random() - 0.5) * BOUNDS * 1.6
+        );
+        timerRef.current = 4 + Math.random() * 5;
       }
-      if (stateRef.current === 'idle' && timerRef.current <= 0) {
-        // Randomly start shadow-boxing
+    } else if (stateRef.current === 'idle' && timerRef.current <= 0) {
+      if (Math.random() < 0.5) {
         stateRef.current = 'exercise';
         timerRef.current = 3 + Math.random() * 2;
-      }
-      if (stateRef.current === 'exercise' && timerRef.current <= 0) {
-        stateRef.current = 'idle';
-        timerRef.current = 2 + Math.random() * 3;
-      }
-    } else {
-      // Wander by hopping
-      if (stateRef.current !== 'wander' || timerRef.current <= 0) {
+      } else {
         stateRef.current = 'wander';
         targetRef.current.set(
           (Math.random() - 0.5) * BOUNDS * 1.6,
@@ -98,6 +79,14 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
         );
         timerRef.current = 4 + Math.random() * 5;
       }
+    } else if (stateRef.current === 'exercise' && timerRef.current <= 0) {
+      stateRef.current = 'wander';
+      targetRef.current.set(
+        (Math.random() - 0.5) * BOUNDS * 1.6,
+        0,
+        (Math.random() - 0.5) * BOUNDS * 1.6
+      );
+      timerRef.current = 4 + Math.random() * 5;
     }
 
     // Movement — kangaroo hops!
@@ -105,7 +94,7 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
     const dx = target.x - pos.x;
     const dz = target.z - pos.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    const wantMove = (stateRef.current === 'wander' || stateRef.current === 'hop') && dist > 0.5;
+    const wantMove = stateRef.current === 'wander' && dist > 0.5;
 
     // Hop physics
     if (wantMove) {
@@ -117,8 +106,6 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
       }
 
       facingRef.current = Math.atan2(dx, dz);
-    } else if ((stateRef.current === 'idle' || stateRef.current === 'exercise') && player) {
-      facingRef.current = Math.atan2(_playerPos.x - pos.x, _playerPos.z - pos.z);
     }
 
     // Apply hop gravity
@@ -128,8 +115,7 @@ export function VoxelKangaroo({ externalRef }: { externalRef?: React.RefObject<T
 
       // Move forward while in air
       if (wantMove) {
-        const speed = stateRef.current === 'hop' ? SPEED * 1.4 : SPEED;
-        const step = speed * delta;
+        const step = SPEED * delta;
         pos.x += (dx / dist) * step;
         pos.z += (dz / dist) * step;
       }

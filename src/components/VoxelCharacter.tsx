@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGameStore } from '../store/gameStore';
+import { handPositions } from '../store/handPositions';
 
 function VoxelBox({ position, args, color }: {
   position: [number, number, number];
@@ -16,25 +17,36 @@ function VoxelBox({ position, args, color }: {
   );
 }
 
-// Jump rope that rotates around the character - thick tube mesh
+// Jump rope: single merged mesh updated via morph-like vertex manipulation
+// Uses a fat TubeGeometry-like approach but only updates positions, not recreating geometry
+const _ropeUp = new THREE.Vector3(0, 1, 0);
+const _ropeDir = new THREE.Vector3();
+const _ropeQuat = new THREE.Quaternion();
+
 function JumpRopeRope() {
   const SEGMENTS = 20;
-  const meshRef = useRef<THREE.Mesh>(null!);
+  const groupRef = useRef<THREE.Group>(null!);
   const ROPE_RADIUS = 1.0;
-  const ROPE_THICKNESS = 0.035;
+  const ROPE_THICKNESS = 0.04;
+  // Use 1.0 height cylinders scaled to actual length - avoids precision issues
+  const BASE_HEIGHT = 1.0;
+
+  const pointsRef = useRef<THREE.Vector3[]>([]);
+  if (pointsRef.current.length === 0) {
+    for (let i = 0; i <= SEGMENTS; i++) {
+      pointsRef.current.push(new THREE.Vector3());
+    }
+  }
 
   useFrame(({ clock }) => {
-    if (!meshRef.current) return;
+    if (!groupRef.current) return;
     const t = clock.elapsedTime;
-    const ropeSpeed = 8;
-    // Negate angle so the rope rotates forward (over the head first, then under feet)
+    const ropeSpeed = 16;
     const angle = -(t * ropeSpeed) % (Math.PI * 2);
-
     const handSpread = 0.5;
     const handY = 0.0;
 
-    // Build curve points for the rope
-    const points: THREE.Vector3[] = [];
+    const points = pointsRef.current;
     for (let i = 0; i <= SEGMENTS; i++) {
       const frac = i / SEGMENTS;
       const x = (frac - 0.5) * handSpread * 2;
@@ -42,56 +54,75 @@ function JumpRopeRope() {
       const sagFactor = Math.sin(arcT);
       const ry = Math.sin(angle) * sagFactor * ROPE_RADIUS;
       const rz = Math.cos(angle) * sagFactor * ROPE_RADIUS;
-      points.push(new THREE.Vector3(x, handY + ry, rz));
+      points[i].set(x, handY + ry, rz);
     }
 
-    const curve = new THREE.CatmullRomCurve3(points);
-    const newGeo = new THREE.TubeGeometry(curve, SEGMENTS * 2, ROPE_THICKNESS, 6, false);
+    const children = groupRef.current.children;
+    for (let i = 0; i < SEGMENTS; i++) {
+      const child = children[i] as THREE.Mesh;
+      const a = points[i];
+      const b = points[i + 1];
 
-    // Replace geometry
-    meshRef.current.geometry.dispose();
-    meshRef.current.geometry = newGeo;
+      // Position at midpoint
+      child.position.set(
+        (a.x + b.x) * 0.5,
+        (a.y + b.y) * 0.5,
+        (a.z + b.z) * 0.5
+      );
+
+      // Direction and length
+      _ropeDir.subVectors(b, a);
+      const len = _ropeDir.length();
+      _ropeDir.normalize();
+
+      // Quaternion that rotates Y-up to the segment direction
+      _ropeQuat.setFromUnitVectors(_ropeUp, _ropeDir);
+      child.quaternion.copy(_ropeQuat);
+
+      // Scale: x/z = 1 (thickness is baked in geo), y = actual length
+      child.scale.set(1, len / BASE_HEIGHT, 1);
+    }
   });
 
-  return (
-    <mesh ref={meshRef}>
-      <tubeGeometry args={[
-        new THREE.CatmullRomCurve3([new THREE.Vector3(-0.5, 0, 0), new THREE.Vector3(0.5, 0, 0)]),
-        4, ROPE_THICKNESS, 6, false
-      ]} />
-      <meshStandardMaterial color="#333333" />
-    </mesh>
-  );
+  const sharedGeo = useMemo(() => new THREE.CylinderGeometry(ROPE_THICKNESS, ROPE_THICKNESS, BASE_HEIGHT, 5, 1), []);
+  const sharedMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#333333' }), []);
+
+  const segs = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < SEGMENTS; i++) {
+      arr.push(<mesh key={i} geometry={sharedGeo} material={sharedMat} />);
+    }
+    return arr;
+  }, [sharedGeo, sharedMat]);
+
+  return <group ref={groupRef}>{segs}</group>;
 }
 
-// Jump rope handles held in hands - visible size
 function JumpRopeHandle() {
   return (
     <group>
-      {/* Handle grip */}
       <mesh>
-        <cylinderGeometry args={[0.045, 0.045, 0.25, 8]} />
+        <cylinderGeometry args={[0.045, 0.045, 0.25, 6]} />
         <meshStandardMaterial color="#ff4488" />
       </mesh>
-      {/* Handle cap */}
       <mesh position={[0, 0.14, 0]}>
-        <cylinderGeometry args={[0.055, 0.055, 0.05, 8]} />
+        <cylinderGeometry args={[0.055, 0.055, 0.05, 6]} />
         <meshStandardMaterial color="#ffaacc" />
       </mesh>
-      {/* Handle bottom */}
       <mesh position={[0, -0.14, 0]}>
-        <cylinderGeometry args={[0.05, 0.04, 0.04, 8]} />
+        <cylinderGeometry args={[0.05, 0.04, 0.04, 6]} />
         <meshStandardMaterial color="#ffaacc" />
       </mesh>
     </group>
   );
 }
 
-export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
+export function VoxelCharacter({ isExercising, currentExercise, isWalkingRef, isDancingRef }: {
   isExercising: boolean;
   currentExercise: string | null;
   exerciseProgress?: number;
-  isWalking: boolean;
+  isWalkingRef: React.RefObject<boolean>;
+  isDancingRef: React.RefObject<boolean>;
 }) {
   const characterScale = useGameStore(s => s.characterScale);
 
@@ -123,16 +154,10 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
 
       switch (currentExercise) {
         case 'barbell': {
-          // Deadlift: bend forward at hips, arms straight down, then stand up
-          // cycle goes -1 to 1. Map to: 0=standing, 1=bent over
-          const bendAmount = (1 - cycle) * 0.5; // 0 to 1
-          // Torso tilts forward (hip hinge)
-          // Arms hang straight down relative to torso
-          leftArmX = rightArmX = 0.4 + bendAmount * 0.6; // arms angle forward
-          // Legs bend slightly (knee flexion)
+          const bendAmount = (1 - cycle) * 0.5;
+          leftArmX = rightArmX = 0.4 + bendAmount * 0.6;
           leftLegX = bendAmount * 0.3;
           rightLegX = leftLegX;
-          // Body dips down when bent
           bodyY = -bendAmount * 0.2;
           break;
         }
@@ -143,66 +168,114 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
           rightLegX = leftLegX;
           break;
         case 'kettlebell': {
-          // Kettlebell swing: hip hinge back then explosive hip thrust forward
-          // Arms swing from between legs to overhead
-          const swingPhase = (cycle + 1) / 2; // 0 to 1
-          // 0 = arms between legs (hinged), 1 = arms overhead (standing tall)
-          leftArmX = rightArmX = 1.0 - swingPhase * 2.8; // 1.0 (down/back) to -1.8 (overhead)
-          // Hip hinge: bend forward at bottom, stand tall at top
+          const swingPhase = (cycle + 1) / 2;
+          leftArmX = rightArmX = 1.0 - swingPhase * 2.8;
           leftLegX = (1 - swingPhase) * 0.35;
           rightLegX = leftLegX;
           bodyY = swingPhase * 0.12;
           break;
         }
         case 'jumprope': {
-          // Rope rotation speed - must match JumpRopeRope component
-          const ropeSpeed = 8;
-          const angle = -(t * ropeSpeed) % (Math.PI * 2);
-
-          // Jump when rope passes under feet
-          const jumpPhase = Math.max(0, Math.sin(angle));
-          bodyY = jumpPhase * 0.45;
-
-          // Arms spread outward from body
-          // Z rotation: left arm NEGATIVE = outward, right arm POSITIVE = outward
+          const ropeSpeed = 16;
+          const jumpSpeed = 8;
+          const ropeAngle = -(t * ropeSpeed) % (Math.PI * 2);
+          const jumpAngle = -(t * jumpSpeed) % (Math.PI * 2);
+          const jumpPhase = Math.max(0, Math.sin(jumpAngle));
+          bodyY = jumpPhase * 0.6;
           leftArmX = 0.15;
           rightArmX = 0.15;
           leftArmZ = -0.5;
           rightArmZ = 0.5;
-
-          // Wrist flick
-          leftWristZ = -Math.sin(angle) * 0.25;
-          rightWristZ = Math.sin(angle) * 0.25;
-
-          // Slight knee bend on landing
-          const kneePhase = Math.max(0, -Math.sin(angle)) * 0.15;
-          leftLegX = kneePhase;
-          rightLegX = kneePhase;
+          leftWristZ = -Math.sin(ropeAngle) * 0.35;
+          rightWristZ = Math.sin(ropeAngle) * 0.35;
+          const tuckPhase = Math.max(0, Math.sin(jumpAngle)) * 0.3;
+          const landPhase = Math.max(0, -Math.sin(jumpAngle)) * 0.15;
+          leftLegX = tuckPhase + landPhase;
+          rightLegX = tuckPhase + landPhase;
           break;
         }
         case 'pullup': {
-          // Pull-up: arms up gripping bar, body pulls up and down
-          const pullPhase = (cycle + 1) / 2; // 0=hanging, 1=chin above bar
-          // Arms always pointing up, elbow bends at top
+          const pullPhase = (cycle + 1) / 2;
           leftArmX = -2.8 + pullPhase * 0.8;
           rightArmX = leftArmX;
-          leftArmZ = 0.3; // arms slightly spread
+          leftArmZ = 0.3;
           rightArmZ = -0.3;
-          // Body rises
           bodyY = pullPhase * 0.7;
-          // Slight leg cross/kick for realism
           leftLegX = Math.sin(t * 4) * 0.06;
           rightLegX = -leftLegX;
           break;
         }
-        case 'rings':
-          bodyY = Math.abs(cycle) * 1.0;
-          leftArmX = rightArmX = -2.8 + Math.abs(cycle) * 1.2;
-          leftLegX = cycle * 0.12;
-          rightLegX = -leftLegX;
+        case 'rings': {
+          // Ring Muscle-Up: 5-phase animation
+          // Phase 0-0.15: Dead hang (arms up, body low)
+          // Phase 0.15-0.4: Pull up to chin (arms bend, body rises)
+          // Phase 0.4-0.55: Transition (lean forward over rings, wrists turn)
+          // Phase 0.55-0.8: Push/dip (press up above rings)
+          // Phase 0.8-1.0: Hold at top then descend back to hang
+          const muscleUpSpeed = 3;
+          const rawPhase = ((t * muscleUpSpeed) % (Math.PI * 2)) / (Math.PI * 2); // 0 to 1
+
+          if (rawPhase < 0.15) {
+            // Dead hang: arms straight up, body hangs low
+            const p = rawPhase / 0.15;
+            bodyY = 0.8 + p * 0.1; // slight swing
+            leftArmX = rightArmX = -3.0; // arms straight up
+            leftArmZ = 0.35;
+            rightArmZ = -0.35;
+            // Legs slightly forward for kip
+            leftLegX = Math.sin(p * Math.PI) * 0.3;
+            rightLegX = leftLegX;
+          } else if (rawPhase < 0.4) {
+            // Pull phase: pull body up, bend arms
+            const p = (rawPhase - 0.15) / 0.25;
+            bodyY = 0.9 + p * 1.2; // rise up
+            // Arms go from straight up (-3.0) to bent (-1.8)
+            leftArmX = rightArmX = -3.0 + p * 1.2;
+            leftArmZ = 0.35 - p * 0.1;
+            rightArmZ = -0.35 + p * 0.1;
+            // Knees tuck slightly during pull
+            leftLegX = 0.2 * (1 - p);
+            rightLegX = leftLegX;
+          } else if (rawPhase < 0.55) {
+            // Transition: lean forward over the rings
+            const p = (rawPhase - 0.4) / 0.15;
+            bodyY = 2.1 + p * 0.4;
+            // Arms transition from pull to support position
+            leftArmX = rightArmX = -1.8 + p * 1.5; // from bent pull to forward lean
+            leftArmZ = 0.25 - p * 0.15;
+            rightArmZ = -0.25 + p * 0.15;
+            // Wrists roll over
+            leftWristZ = -p * 0.4;
+            rightWristZ = p * 0.4;
+            leftLegX = p * 0.15;
+            rightLegX = leftLegX;
+          } else if (rawPhase < 0.8) {
+            // Push/dip: press up above rings, arms extend down
+            const p = (rawPhase - 0.55) / 0.25;
+            bodyY = 2.5 + p * 0.5;
+            // Arms push down from bent to straight (support position)
+            leftArmX = rightArmX = -0.3 + p * 0.3; // nearly straight at sides
+            leftArmZ = 0.1;
+            rightArmZ = -0.1;
+            leftWristZ = -0.4 * (1 - p);
+            rightWristZ = 0.4 * (1 - p);
+            leftLegX = 0.15 * (1 - p);
+            rightLegX = leftLegX;
+          } else {
+            // Top hold then descend
+            const p = (rawPhase - 0.8) / 0.2;
+            bodyY = 3.0 - p * 2.2; // descend back down
+            // Arms go from support back to dead hang
+            leftArmX = rightArmX = 0.0 - p * 3.0;
+            leftArmZ = 0.1 + p * 0.25;
+            rightArmZ = -0.1 - p * 0.25;
+            leftLegX = p * 0.15;
+            rightLegX = leftLegX;
+          }
           break;
+        }
       }
-    } else if (isWalking) {
+    } else if (isWalkingRef.current) {
       const walkSpeed = 8;
       const swing = Math.sin(t * walkSpeed);
       leftArmX = -swing * 0.6;
@@ -210,6 +283,29 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
       leftLegX = swing * 0.7;
       rightLegX = -swing * 0.7;
       bodyY = Math.abs(Math.sin(t * walkSpeed * 2)) * 0.04;
+    } else if (isDancingRef.current) {
+      // Dance animation: funky groove
+      const dSpeed = 5;
+      const beat = Math.sin(t * dSpeed);
+      const beat2 = Math.sin(t * dSpeed * 2);
+      const beat3 = Math.cos(t * dSpeed);
+
+      // Bounce up and down to the beat
+      bodyY = Math.abs(beat2) * 0.15;
+
+      // Arms pump and wave
+      leftArmX = -1.5 + Math.sin(t * dSpeed + 1) * 0.8;
+      rightArmX = -1.5 + Math.sin(t * dSpeed) * 0.8;
+      leftArmZ = -0.3 + beat3 * 0.4;
+      rightArmZ = 0.3 - beat3 * 0.4;
+
+      // Wrists flick
+      leftWristZ = Math.sin(t * dSpeed * 2) * 0.3;
+      rightWristZ = -Math.sin(t * dSpeed * 2) * 0.3;
+
+      // Legs step side to side
+      leftLegX = beat * 0.3;
+      rightLegX = -beat * 0.3;
     } else {
       bodyY = Math.sin(t * 2) * 0.03;
       leftArmX = Math.sin(t * 1.5) * 0.03;
@@ -233,10 +329,20 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
 
     if (ponytailRef.current) {
       const bouncy = currentExercise === 'jumprope' && isExercising;
-      const swayX = bouncy ? Math.sin(t * 8) * 0.3 : isWalking ? Math.sin(t * 8) * 0.15 : Math.sin(t * 1.5) * 0.03;
-      const swayZ = (bouncy || isWalking) ? Math.cos(t * 8) * 0.1 : 0;
+      const walking = isWalkingRef.current;
+      const swayX = bouncy ? Math.sin(t * 8) * 0.3 : walking ? Math.sin(t * 8) * 0.15 : Math.sin(t * 1.5) * 0.03;
+      const swayZ = (bouncy || walking) ? Math.cos(t * 8) * 0.1 : 0;
       ponytailRef.current.rotation.x = swayX;
       ponytailRef.current.rotation.z = swayZ;
+    }
+
+    // Share hand world positions for rings equipment tracking
+    if (isExercising && currentExercise === 'rings' && leftWristRef.current && rightWristRef.current) {
+      leftWristRef.current.getWorldPosition(handPositions.left);
+      rightWristRef.current.getWorldPosition(handPositions.right);
+      handPositions.active = true;
+    } else {
+      handPositions.active = false;
     }
   });
 
@@ -249,9 +355,7 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
 
   return (
     <group scale={[characterScale, characterScale, characterScale]}>
-      {/* Whole body moves up/down together */}
       <group ref={wholeBodyRef}>
-        {/* === LEGS (pivot at hip) === */}
         {/* Left leg */}
         <group ref={leftLegRef} position={[-0.15, 0.55, 0]}>
           <VoxelBox position={[0, -0.15, 0]} args={[0.22, 0.45, 0.25]} color={shorts} />
@@ -265,11 +369,9 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
           <VoxelBox position={[0, -0.7, 0.04]} args={[0.22, 0.1, 0.3]} color={shoes} />
         </group>
 
-        {/* === UPPER BODY === */}
+        {/* Upper body */}
         <group position={[0, 0.7, 0]}>
-          {/* Torso - crop tank */}
           <VoxelBox position={[0, 0.25, 0]} args={[0.5, 0.4, 0.3]} color={tank} />
-          {/* Midriff - exposed skin */}
           <VoxelBox position={[0, 0, 0]} args={[0.45, 0.15, 0.28]} color={skin} />
 
           {/* Left arm */}
@@ -278,7 +380,6 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
             <VoxelBox position={[0, -0.25, 0]} args={[0.16, 0.25, 0.18]} color={skin} />
             <group ref={leftWristRef} position={[0, -0.47, 0]}>
               <VoxelBox position={[0, 0, 0]} args={[0.14, 0.2, 0.16]} color={skin} />
-              {/* Jump rope handle in left hand - extends below fist */}
               {isExercising && currentExercise === 'jumprope' && (
                 <group position={[0, -0.18, 0]}>
                   <JumpRopeHandle />
@@ -293,7 +394,6 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
             <VoxelBox position={[0, -0.25, 0]} args={[0.16, 0.25, 0.18]} color={skin} />
             <group ref={rightWristRef} position={[0, -0.47, 0]}>
               <VoxelBox position={[0, 0, 0]} args={[0.14, 0.2, 0.16]} color={skin} />
-              {/* Jump rope handle in right hand - extends below fist */}
               {isExercising && currentExercise === 'jumprope' && (
                 <group position={[0, -0.18, 0]}>
                   <JumpRopeHandle />
@@ -302,7 +402,6 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
             </group>
           </group>
 
-          {/* Jump rope - rope rendered at upper body level, handles in hands */}
           {isExercising && currentExercise === 'jumprope' && (
             <JumpRopeRope />
           )}
@@ -316,14 +415,12 @@ export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
             <VoxelBox position={[0, 0, -0.2]} args={[0.38, 0.35, 0.08]} color={hair} />
             <VoxelBox position={[0, 0.12, 0]} args={[0.46, 0.08, 0.46]} color={headband} />
 
-            {/* Ponytail */}
             <group ref={ponytailRef} position={[0, 0.1, -0.25]}>
               <VoxelBox position={[0, 0, 0]} args={[0.15, 0.15, 0.12]} color={hair} />
               <VoxelBox position={[0, -0.18, -0.06]} args={[0.12, 0.2, 0.1]} color={hair} />
               <VoxelBox position={[0, -0.38, -0.04]} args={[0.1, 0.18, 0.08]} color={hair} />
             </group>
 
-            {/* Eyes */}
             <VoxelBox position={[-0.1, 0.02, 0.2]} args={[0.08, 0.06, 0.02]} color="#222222" />
             <VoxelBox position={[0.1, 0.02, 0.2]} args={[0.08, 0.06, 0.02]} color="#222222" />
             <VoxelBox position={[-0.08, 0.04, 0.21]} args={[0.03, 0.03, 0.01]} color="#ffffff" />

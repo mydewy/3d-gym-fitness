@@ -22,11 +22,22 @@ interface GameState {
   message: string | null;
   history: ExerciseRecord[];
   characterScale: number;
+  mobileInput: { x: number; y: number };
+  mobileAction: boolean;
+  mobileDance: boolean;
+  mobileJump: boolean;
 
   startExercise: (name: string) => void;
   completeExercise: () => void;
   tick: () => void;
   clearMessage: () => void;
+  setMobileInput: (x: number, y: number) => void;
+  triggerMobileAction: () => void;
+  clearMobileAction: () => void;
+  triggerMobileDance: () => void;
+  clearMobileDance: () => void;
+  triggerMobileJump: () => void;
+  clearMobileJump: () => void;
 }
 
 const EXERCISE_CONFIG: Record<string, { stat: keyof PlayerStats; xp: number; duration: number }> = {
@@ -55,6 +66,18 @@ export const useGameStore = create<GameState>((set, get) => ({
   message: null,
   history: [],
   characterScale: 1,
+  mobileInput: { x: 0, y: 0 },
+  mobileAction: false,
+  mobileDance: false,
+  mobileJump: false,
+
+  setMobileInput: (x: number, y: number) => set({ mobileInput: { x, y } }),
+  triggerMobileAction: () => set({ mobileAction: true }),
+  clearMobileAction: () => set({ mobileAction: false }),
+  triggerMobileDance: () => set({ mobileDance: true }),
+  clearMobileDance: () => set({ mobileDance: false }),
+  triggerMobileJump: () => set({ mobileJump: true }),
+  clearMobileJump: () => set({ mobileJump: false }),
 
   startExercise: (name: string) => {
     if (get().isExercising) return;

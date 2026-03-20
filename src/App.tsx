@@ -1,12 +1,17 @@
-import { Suspense } from 'react';
+import { Suspense, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Physics, RigidBody, CuboidCollider } from '@react-three/rapier';
+import * as THREE from 'three';
 import { GymEquipment } from './components/GymEquipment';
 import { PlayerController } from './components/PlayerController';
 import { GameCamera } from './components/GameCamera';
-import { AllStationLabels } from './components/StationLabel';
 import { ExerciseEffect } from './components/ExerciseEffect';
+import { VoxelDog } from './components/VoxelDog';
+import { VoxelKangaroo } from './components/VoxelKangaroo';
+import { VoxelDachshunds } from './components/VoxelDachshund';
 import { HUD } from './components/HUD';
+import { MobileControls } from './components/MobileControls';
+import { useGameStore } from './store/gameStore';
 
 function GymWalls() {
   return (
@@ -41,8 +46,8 @@ function Lights() {
         color="#fff5e6"
         intensity={1.5}
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-far={50}
         shadow-camera-left={-15}
         shadow-camera-right={15}
@@ -55,13 +60,14 @@ function Lights() {
         intensity={80}
         angle={1.2}
         penumbra={0.5}
-        castShadow
       />
     </>
   );
 }
 
 function Game() {
+  const kangarooRef = useRef<THREE.Group>(null!);
+
   return (
     <>
       <GameCamera />
@@ -75,16 +81,24 @@ function Game() {
       </Physics>
 
       <GymEquipment />
-      <AllStationLabels />
+      <VoxelDog />
+      <VoxelKangaroo externalRef={kangarooRef} />
+      <VoxelDachshunds kangarooRef={kangarooRef} />
       <ExerciseEffect />
     </>
   );
 }
 
 export default function App() {
+  const setMobileInput = useGameStore(s => s.setMobileInput);
+  const triggerMobileAction = useGameStore(s => s.triggerMobileAction);
+  const triggerMobileDance = useGameStore(s => s.triggerMobileDance);
+  const triggerMobileJump = useGameStore(s => s.triggerMobileJump);
+
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' }}>
       <HUD />
+      <MobileControls onMove={setMobileInput} onAction={triggerMobileAction} onDance={triggerMobileDance} onJump={triggerMobileJump} />
       <Canvas shadows camera={{ position: [10, 12, 10], fov: 35 }}>
         <Suspense fallback={null}>
           <Game />

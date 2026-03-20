@@ -122,7 +122,7 @@ export function HUD() {
         color: 'rgba(255,255,255,0.5)', fontSize: 10,
         background: 'rgba(0,0,0,0.4)', padding: '6px 16px', borderRadius: 8,
       }}>
-        WASD: Move | SPACE: Exercise
+        WASD: Move | SPACE: Jump | E: Exercise | T: Dance
       </div>
     </div>
   );

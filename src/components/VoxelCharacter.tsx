@@ -87,10 +87,10 @@ function JumpRopeHandle() {
   );
 }
 
-export function VoxelCharacter({ isExercising, currentExercise, exerciseProgress, isWalking }: {
+export function VoxelCharacter({ isExercising, currentExercise, isWalking }: {
   isExercising: boolean;
   currentExercise: string | null;
-  exerciseProgress: number;
+  exerciseProgress?: number;
   isWalking: boolean;
 }) {
   const characterScale = useGameStore(s => s.characterScale);

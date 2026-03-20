@@ -16,7 +16,7 @@ export function PlayerController() {
   const [facing, setFacing] = useState(0);
   const [isWalking, setIsWalking] = useState(false);
   const nearStationRef = useRef<string | null>(null);
-  const [nearStation, setNearStation] = useState<string | null>(null);
+  const [_nearStation, setNearStation] = useState<string | null>(null);
 
   const isExercising = useGameStore(s => s.isExercising);
   const currentExercise = useGameStore(s => s.currentExercise);
